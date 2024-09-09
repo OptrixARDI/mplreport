@@ -25,12 +25,114 @@ try:
 except:
     pass
 
+def GetReportSettings():
+    basepath = os.path.dirname(os.path.abspath(__file__))
+    settings = {}
+
+    if os.path.exists(basepath + "/settings.json"):
+        fl = open(basepath + "/settings.json","r")
+        content = fl.read()
+        fl.close()
+
+        return json.loads(content)
+        
+    else:
+        fl = open(basepath + "/settings.txt", "r")
+        lines = fl.readlines()        
+        fl.close()        
+
+        settings['server'] = lines[3].strip()
+        settings['sitecode'] = lines[1].strip()
+        settings['sitename'] = lines[0].strip()
+        settings['timezone'] = lines[2].strip()        
+
+    return settings
+
+def ParseReportArgs(name):
+    import argparse
+    from dateutil import tz
+    deftz = "Australia/Sydney"
+    defserver = "localhost/s/default"
+    defname = "ARDI Server"
+    defcode = "ARDI"
+    
+    #Load Defaults
+    try:        
+        settings = GetReportSettings()
+        defcode = settings['sitecode']
+        defserver = settings['server']
+        defname = settings['sitename']
+        deftz = settings['timezone']
+    except:
+        settings = {}
+        pass
+
+    #Get command-line parameters
+    parser = argparse.ArgumentParser(description="Create " + name)
+    parser.add_argument('startdate',help='The start date for the report')
+    parser.add_argument('enddate', help='The end date for the report')
+    parser.add_argument('target', help='The file/folder to write output to')
+    parser.add_argument('timezone',help='The timezone to use',default=deftz)
+    parser.add_argument('--nopng',dest='nopng',action='store_const',const=True,default=False)
+    parser.add_argument('--server',dest='server',default=defserver)
+    parser.add_argument('--param',dest='param',default=None)
+    parser.add_argument('--rebrand',dest='rebrand',default=None)
+    parser.add_argument('--format',dest='format',default='pdf')
+    parser.add_argument('--style',dest="style",default=None)
+    parser.add_argument('--page', dest="page",default=None,type=int)
+    parser.add_argument('--size', dest="size",default=None)
+    args = parser.parse_args()
+
+    args.local_zone = tz.gettz(args.timezone)
+    args.server_zone = tz.gettz('UTC')
+
+    localst = datetime.datetime.strptime(args.startdate,'%Y-%m-%d %H:%M:%S')
+    localst = localst.replace(tzinfo=args.local_zone)
+    utcst = localst.astimezone(args.server_zone)
+
+    localen = datetime.datetime.strptime(args.enddate,'%Y-%m-%d %H:%M:%S')
+    localen = localen.replace(tzinfo=args.local_zone)
+    utcen = localen.astimezone(args.server_zone)
+
+    args.location = defname
+    args.code = defcode
+
+    if utcst > utcen:
+        a = utcen
+        utcen = utcst
+        utcst = a
+
+        a = localst
+        localst = localen
+        localen = a
+
+    args.localstart = localst
+    args.localend = localen
+    
+    args.start = utcst.strftime('%Y-%m-%d %H:%M:%S')
+    args.end = utcen.strftime('%Y-%m-%d %H:%M:%S')
+
+    args.utcstart = utcst
+    args.utcend = utcen
+    args.rebranded = False
+    
+    args.reportname = name
+    try:
+        if args.reportname is not None:
+            if args.rebrand is not None:
+                args.reportname = args.rebrand
+                args.rebranded = True
+    except:
+        pass
+
+    return args
+
 def ardireport(*args,**kwargs):    
     def wrap_report(func):
-        import aql
+        #import aql
                 
         stime = datetime.datetime.now()
-        rargs = aql.ReportArgs(args[0])
+        rargs = ParseReportArgs(args[0])
         report = CreateFromArgs(rargs,*kwargs)
 
         configfile = None        
@@ -48,10 +150,16 @@ def ardireport(*args,**kwargs):
             try:
                 if rargs.nopng == False:
                     keyvalue = outengine.KVOutput("Report Output",configfile = configfile)
-                    event = outengine.EVOutput("Report Output",configfile = configfile)                       
+                    event = outengine.EVOutput("Report Output",configfile = configfile)
+                else:
+                    keyvalue = None
+                    event = None
             except:
                 event = None
                 keyvalue = None
+        else:
+            event = None
+            keyvalue = None
 
         report.keyvalue = keyvalue
         report.event = event
@@ -97,9 +205,15 @@ def ardireport(*args,**kwargs):
 
 
 def CreateFromArgs(args):
+    settings = GetReportSettings()    
+
     paper = "default"
     if args.size is not None:
         paper = args.size
+    else:
+        if 'paper' in settings:
+            paper = settings['paper']
+            
     previewdir = args.target + ".png"
     if args.nopng == True:
         previewdir = None
@@ -110,6 +224,7 @@ def CreateFromArgs(args):
     rep.ardiserver = args.server
     rep.arguments = args
     rep.timezonename = args.timezone
+    rep.settings = settings
     try:
         rep.common = sitecommon.SiteCommon()
     except:
@@ -223,8 +338,7 @@ class MPLReport():
         wid = 8.27
         hit = 11.69
         psize = psize.upper()
-
-        #print("New Page Size: " + str(psize))
+        
         if psize == "DEFAULT":
             psize = "A4"
 
@@ -303,13 +417,20 @@ class MPLReport():
             endtime = self.defaultend
         if starttime is None:
             starttime = self.defaultstart
+
+        datepart = '%d/%m'
+        if 'dateformat' in self.settings:
+            if self.settings['dateformat'] == 'MDY':
+                datepart = '%m/%d'
+            if self.settings['dateformat'] == 'YMD':
+                datepart = '%m/%d'
             
         df = (endtime - starttime).total_seconds()
         if df > (60*60*24):
             if df > (60*60*24*3):
-                return '%d/%m'
+                return datepart
             else:
-                return '%H %d/%m'        
+                return '%H ' + datepart
         return '%H:%M'
 
     def DateFormatter(self,starttime=None,endtime=None):        
@@ -627,6 +748,23 @@ class MPLReport():
     def TimeAxis(self,ax):
         ax.set_major_formatter(self.DateFormatter())
 
+    def DurationUnitFromSeconds(self,duration):
+        spn = duration
+        unit = 's'
+        multiplier = 1
+
+        if spn > 90:
+            unit = 'm'
+            multiplier = 60
+        if spn > 5400:
+            unit = 'h'
+            multiplier = 60*60
+        if spn > 172800:
+            unit = 'days'
+            multiplier = 60*60*24
+
+        return (unit, multiplier)  
+
     def DurationUnit(self,start=None,end=None):
         if start is None:
             start = self.defaultstart
@@ -778,15 +916,22 @@ class MPLReport():
         return (litems,named)
 
     def GetDiscreteColourMap(self,dta,col):
-        mp = dta.GetColourMap(col)
-        indx = -1
-        for x in mp:
-            indx += 1
-            if str(x)[0] == '#':
-                mp[indx] = ardiapi.ParseHexColour(x[1:])
-            else:
-                mp[x] = ardiapi.ParseHexColour(mp[x])
-            
+        mp = dta.GetColourMap(col)        
+        if isinstance(mp,dict):
+            for x in mp:                
+                if str(mp[x])[0] == '#':
+                    mp[x] = ardiapi.ParseHexColour(mp[x][1:])
+                else:
+                    mp[x] = ardiapi.ParseHexColour(mp[x])
+        else:
+            indx = -1
+            for x in mp:   
+                indx += 1
+                if str(x)[0] == '#':
+                    mp[indx] = ardiapi.ParseHexColour(x[1:])
+                else:
+                    mp[indx] = ardiapi.ParseHexColour(x)
+                    
         return mp
 
     def GetDiscreteValueMap(self,dta,col):
@@ -829,17 +974,19 @@ class MPLReport():
             return (cmap,minvalue,maxvalue)
 
         import matplotlib
-        
-        return matplotlib.cm.get_cmap('viridis')
+        minvalue = float(md['min'])
+        maxvalue = float(md['max'])
+        return (matplotlib.cm.get_cmap('viridis'),minvalue,maxvalue)
 
     def GetARDIServer(self):
         if self.ardiserver is None:
             return None
         
-        if self.srv is None:            
-            self.srv = ardiapi.Server(self.ardiserver)
+        if self.srv is None:                        
+            self.srv = ardiapi.Server(self.ardiserver)            
             
             if self.srv.Connect() == False:
+                print("Could not connect to ARDI server " + self.ardiserver)
                 self.srv = None
                 
         return self.srv
@@ -874,6 +1021,7 @@ class MPLReport():
         ax.axis('off')     
 
         self.Save()
+        print("FAILED")
 
     def UTCTime(self,tm):
         if self.tz is None:

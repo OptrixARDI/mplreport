@@ -34,12 +34,12 @@ class Server:
         bits = srv.split("/")
         if bits[0] == "":
             bits = bits[1:]
-        if bits[1] == 's':
+        if len(bits) > 1 and bits[1] == 's':
             self.site = bits[2]
-            self.server = bits[0]
+            self.server = bits[0]        
 
     def Connect(self):
-        url =  self.prefix + self.server + '/s/' + self.site + '/api/connect'        
+        url =  self.prefix + self.server + '/s/' + self.site + '/api/connect'                
         resp = requests.get(url)
 
         # HTTP response code, e.g. 200.
