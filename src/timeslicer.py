@@ -300,6 +300,14 @@ class TimeSlices:
             return None
             
         return pd.DataFrame(data = data, index=indexes, columns = collist)
+
+    def GetClassAt(self,dt):
+        for sl in self.slices:
+            if sl.start <= dt:
+                if sl.end > dt:
+                    return sl.classes
+
+        return []
         
 #Performs time-slicing on a Pandas DataFrame
 class TimeSlicer:
@@ -310,6 +318,25 @@ class TimeSlicer:
     #Adds a test
     def AddTest(self,test,positive,negative):
         self.tests.append(SliceTest(test,positive,negative))
+
+    #Adds a splitter
+    def AddSplit(self,value):
+        self.tests.append(SliceTest(value,None,None))
+
+    #Adds a channel from an array of events
+    def AddEventRegions(self,arr,colname,source,start,end,utc=False,default=None):
+        inarr = [default] * len(self.df.index)
+        indx = 0
+        for x in self.df.index:
+            for n in range(0,len(arr)):
+                if x > arr[n][start] and x < arr[n][end]:
+                    inarr[indx] = arr[n][source]
+            indx += 1
+
+        self.df[colname] = inarr
+
+    def cleanclassname(self,nm):
+        return nm.replace(" ","")
         
     #Performs slicing using the tests
     def Slice(self):
@@ -323,12 +350,15 @@ class TimeSlicer:
             #Check for classes...
             classlist = []
             for t in self.tests:
-                if t.test(rw) == True:
-                    if t.positive is not None:
-                        classlist.append(t.positive)
+                if t.positive is None:                    
+                    classlist.append(self.cleanclassname(t.test+"_"+rw[t.test]))
                 else:
-                    if t.negative is not None:
-                        classlist.append(t.negative)
+                    if t.test(rw) == True:
+                        if t.positive is not None:
+                            classlist.append(t.positive)
+                    else:
+                        if t.negative is not None:
+                            classlist.append(t.negative)
                         
             #Ignore first sample
             if lastindx is None:

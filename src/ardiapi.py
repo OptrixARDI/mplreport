@@ -39,7 +39,7 @@ class Server:
             self.server = bits[0]        
 
     def Connect(self):
-        url =  self.prefix + self.server + '/s/' + self.site + '/api/connect'                
+        url =  self.prefix + self.server + '/s/' + self.site + '/api/connect'        
         resp = requests.get(url)
 
         # HTTP response code, e.g. 200.
@@ -309,7 +309,7 @@ class AQLQuery:
             try:
                 return float(dta)
             except:
-                return None
+                return dta
 
     def cvInt(self,dta):
         if dta == "^":
@@ -325,6 +325,8 @@ class AQLQuery:
                 local = datetime.datetime.strptime(dt, "%Y-%m-%d %H:%M:%S.%f")
             except:
                 local = dt
+                return None
+            
         local = local.replace(tzinfo=fromtz)        
         
         return local.astimezone(totz).strftime("%Y-%m-%d %H:%M:%S")
@@ -395,7 +397,8 @@ class AQLQuery:
                 if finaldf is None:
                     finaldf = df
                 else:
-                    finaldf = finaldf.append(df)
+                    finaldf = pd.concat([finaldf,df])
+                    #finaldf = finaldf.append(df)
 
             if md == False:
                 return finaldf
@@ -487,7 +490,7 @@ class AQLQuery:
                 final = n.fillna(value=np.nan)
             else:
                 n = n.fillna(value=np.nan)
-                final = final.join(n,how='outer')
+                final = final.join(n,how='outer',lsuffix="",rsuffix="_dup")
                 final = final.groupby(level=0).min()        
 
         #If no history was available, make up a dataframe from the point list data
