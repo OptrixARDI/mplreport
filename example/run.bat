@@ -1,0 +1,1 @@
+c:\python310\python report.py "2025-01-01 10:00:00" "2025-01-01 11:00:00" "report" "Australia/Sydney" --server "demo.optrix.com.au/s/long"

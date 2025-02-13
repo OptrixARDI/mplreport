@@ -1,0 +1,1 @@
+ardipython report.py "2025-01-01 10:00:00" "2025-01-02 10:00:00" "report" "Australia/Sydney" --server "demo.optrix.com.au/s/long"

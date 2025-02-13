@@ -15,9 +15,14 @@ try:
 except:
     pass
 
-try:
-    import ardi.util.outputengine as outengine
+try:    
+    import ardi.util.outputengine as outengine    
 except:
+    try:    
+        import outputengine as outengine        
+    except:
+        print("Modular Output System Not Available On This Device")
+        pass
     pass
 
 try:
@@ -25,6 +30,7 @@ try:
 except:
     pass
 
+#Get report settings from the config file
 def GetReportSettings():
     basepath = os.path.dirname(os.path.abspath(__file__))
     settings = {}
@@ -37,17 +43,24 @@ def GetReportSettings():
         return json.loads(content)
         
     else:
-        fl = open(basepath + "/settings.txt", "r")
-        lines = fl.readlines()        
-        fl.close()        
+        if os.path.exists(basepath + "/settings.txt"):
+            fl = open(basepath + "/settings.txt", "r")
+            lines = fl.readlines()        
+            fl.close()        
 
-        settings['server'] = lines[3].strip()
-        settings['sitecode'] = lines[1].strip()
-        settings['sitename'] = lines[0].strip()
-        settings['timezone'] = lines[2].strip()        
+            try:
+                settings['server'] = lines[3].strip()
+                settings['sitecode'] = lines[1].strip()
+                settings['sitename'] = lines[0].strip()
+                settings['timezone'] = lines[2].strip()        
+            except:
+                pass
+        else:
+            settings = {}
 
     return settings
 
+#Parse command-line parameters
 def ParseReportArgs(name):
     import argparse
     from dateutil import tz
@@ -246,6 +259,7 @@ def UTCToLocalTime(tm):
     tm = tm.replace(tzinfo=None)
     return tm
 
+#Create a simple MatPlotLib report
 class MPLReport():
     def __init__(self,name,target,preview=None,papersize="default",orient="portrait",multipage=False,fmt="pdf",style=None,defaultstart=None,defaultend=None):
         self.multi = multipage
@@ -279,6 +293,7 @@ class MPLReport():
 
         pd.plotting.register_matplotlib_converters()
 
+    #Create a single page. Same arguments as 'subplots'
     def CreatePage(self,*args,**kwargs):
 
         if self.tz is None:
@@ -397,9 +412,11 @@ class MPLReport():
         self.figure = fig
         return (fig,ax)
 
+    #Adjusts the overall report margins
     def NudgeContent(self,x,y):
         self.nudge = (x,y)
 
+    #Writes out an alert, if required
     def WriteAlert(self,alertname,alertvalue):
         if self.alerts is None:
             self.alerts = {}
@@ -433,9 +450,11 @@ class MPLReport():
                 return '%H ' + datepart
         return '%H:%M'
 
+    #Returns a suitable date formatter for the given range
     def DateFormatter(self,starttime=None,endtime=None):        
         return mdates.DateFormatter(self.DateFormat(starttime,endtime))
 
+    #Internal: Adjust the logo position based on the print DPI
     def AdjustLogoForDPI(self,dpi):
         img = None
         try:
@@ -447,6 +466,7 @@ class MPLReport():
         if img is None:
             return
 
+    #Draw a simple title block at the top of the page
     def Title(self,starttime=None,endtime=None,override=None,location=None,args=None):        
         
         top = 0.94
@@ -525,6 +545,7 @@ class MPLReport():
             plt.subplots_adjust(top=1-self.titlespace)
         self.sizeset = True
 
+    #Write out the report
     def Save(self):
 
         if self.sizeset == False:
@@ -627,6 +648,7 @@ class MPLReport():
             fl.flush()
             fl.close()
 
+    #Mark a single MatPlotLib axis as a failure
     def FailedAxis(self,ax,message="Invalid / No Data"):
         try:
             ax.axis('tight')
@@ -638,11 +660,13 @@ class MPLReport():
         except:
             traceback.print_exc()
         
+    #Draw a simple grid
     def Grid(self,ax):
         ax.set_axisbelow(True)
         ax.yaxis.grid(color='gray', linestyle='dashed')
         ax.xaxis.grid(color='gray', linestyle='dashed')
 
+    #Get the current values from an AQL query
     def GetCurrent(self,query):
         self.srv = self.GetARDIServer()
         qry = self.srv.StartQuery()
@@ -662,10 +686,12 @@ class MPLReport():
 
         return pd.DataFrame(data = [values],columns=columns,index=[datetime.datetime.now()])
 
+    #Get history from ARDI with Metadata
     def FetchHistory(self,query,**kwargs):
         kwargs["md"] = True
         return self.GetHistory(query,**kwargs) 
 
+    #Get history from ARDI without Metadata
     def GetHistory(self,query,start=None,end=None,samples=None,method=None,utc=False,md=False):
 
         if "GETHISTORY" not in query:
@@ -708,6 +734,7 @@ class MPLReport():
         #Get the pandas data-frame with the results.
         return qry.GetHistory(req,md)
 
+    #Get a list of events from ARDI
     def GetEvents(self,source=None,start=None,end=None,utc=True):
         if start is None:
             start = self.defaultstart
@@ -742,12 +769,15 @@ class MPLReport():
             
         return resolved
 
+    #Clear the PDF
     def Clear(self):
         self.pdf = None
 
+    #Format the time axis with an appropriate scale
     def TimeAxis(self,ax):
         ax.set_major_formatter(self.DateFormatter())
 
+    #Find a suitable duration unit given a number of seconds
     def DurationUnitFromSeconds(self,duration):
         spn = duration
         unit = 's'
@@ -765,6 +795,7 @@ class MPLReport():
 
         return (unit, multiplier)  
 
+    #Find a suitable duration unit given the range of the report or the given date range.
     def DurationUnit(self,start=None,end=None):
         if start is None:
             start = self.defaultstart
@@ -788,6 +819,7 @@ class MPLReport():
 
         return (unit, multiplier)    
 
+    #Map a sequence of index numbers to an axis based on the report time range
     def HeatMapTimeAxis(self,ax,samples,starttime=None,endtime=None):
 
         if starttime is None:
@@ -813,6 +845,7 @@ class MPLReport():
         ax.set_ticks(xticks)
         ax.set_ticklabels(xticklabels)
 
+    #Remove common elements from a set of axis ticks
     def SimplifyTicks(self,ticks):
         common = None
 
@@ -880,9 +913,11 @@ class MPLReport():
 
         return ticks
 
+    #Get a small colour sequence
     def GetDefaultSequence(self):
         return ['g','b','y','m','c','r','purple','orange','silver']
 
+    #Create the items for a legend based on discrete property metadata
     def GetDiscreteLegend(self,dta,col):
 
         from matplotlib.patches import Patch        
@@ -915,6 +950,7 @@ class MPLReport():
 
         return (litems,named)
 
+    #Get a MatPlotLib colour table based on property metadata
     def GetDiscreteColourMap(self,dta,col):
         mp = dta.GetColourMap(col)        
         if isinstance(mp,dict):
@@ -934,12 +970,15 @@ class MPLReport():
                     
         return mp
 
+    #Get a MatPlotLib colour table based on property metadata
     def GetDiscreteValueMap(self,dta,col):
         return dta.GetValueMap(col)
 
+    #Get a MatPlotLib colour table based on property metadata
     def GetAnalogueColourMap(self,dta,col):
         return self.GetAnalogColourMap(dta,col)
 
+    #Get a MatPlotLib colour table based on property metadata
     def GetAnalogColourMap(self,dta,col):
         from matplotlib.colors import LinearSegmentedColormap
         md = dta.GetColumnData(col)
@@ -978,6 +1017,7 @@ class MPLReport():
         maxvalue = float(md['max'])
         return (matplotlib.cm.get_cmap('viridis'),minvalue,maxvalue)
 
+    #Gets the ARDI server object
     def GetARDIServer(self):
         if self.ardiserver is None:
             return None
@@ -991,6 +1031,7 @@ class MPLReport():
                 
         return self.srv
         
+    #Show a failure message
     def Failed(self,showex=True):
         try:
             import traceback
@@ -1003,16 +1044,16 @@ class MPLReport():
 
         self.Title(self.name)
 
-        ax.text(0.5,0.65,"An Error Occured Generating This Chart",verticalalignment='top',horizontalalignment='center',fontsize=20,fontweight='bold')
+        ax.text(0.5,0.65,"This Report is Unavailable",verticalalignment='top',horizontalalignment='center',fontsize=20,fontweight='bold')
         
-        ax.text(0.5,0.35,"This is usually due to little or no activity during the reporting period.",verticalalignment='top',horizontalalignment='center',multialignment='center')
+        #ax.text(0.5,0.35,"This is usually due to little or no activity during the reporting period.",verticalalignment='top',horizontalalignment='center',multialignment='center')
         
         try:
             content = traceback.format_exc()
             lines = content.split("\n")
             summary = lines[len(lines)-2]            
 
-            ax.text(0.5,0.2,summary,verticalalignment='top',horizontalalignment='center',multialignment='center')
+            #ax.text(0.5,0.2,summary,verticalalignment='top',horizontalalignment='center',multialignment='center')
             
             traceback.print_exc()
         except:
@@ -1023,6 +1064,37 @@ class MPLReport():
         self.Save()
         print("FAILED")
 
+    #Show an overall failure message, but still consider the report successful (use when no data is available)
+    def SoftFailure(self,message):
+        try:
+            import traceback
+        except:
+            pass
+
+        self.Clear()
+
+        fig,ax = self.CreatePage(1)
+
+        self.Title(self.name)
+
+        ax.text(0.5,0.65,"This Report Is Empty",verticalalignment='top',horizontalalignment='center',fontsize=20,fontweight='bold')
+        
+        ax.text(0.5,0.35,message,verticalalignment='top',horizontalalignment='center',multialignment='center')
+                
+        ax.axis('off')
+
+    #Convert a Pandas index from UTC to local time
+    def LocalIndex(self,df):
+        if self.tz is None:
+            if self.timezonename == "UTC":
+                self.tz = pytz.utc
+            else:
+                self.tz = pytz.timezone(self.timezonename)
+                
+        df.index = df.index.tz_localize(pytz.utc).tz_convert(self.tz).tz_localize(None)
+        return df
+
+    #Convert local time to UTC Time
     def UTCTime(self,tm):
         if self.tz is None:
             if self.timezonename == "UTC":
@@ -1035,6 +1107,7 @@ class MPLReport():
         tm = tm.replace(tzinfo=None)
         return tm
 
+    #Convert UTC time to Local time
     def LocalTime(self,tm):
         if self.tz is None:
             if self.timezonename == "UTC":
@@ -1047,14 +1120,17 @@ class MPLReport():
         tm = tm.replace(tzinfo=None)
         return tm
 
+    #Log an event to the Modular Output System
     def LogEvent(self,name,duration,offset=0,options=None):
         if self.events is not None:
             self.events.Write(name,duration,offset=offset,options=options)        
 
+    #Log a key/value to the Modular Output System
     def LogValue(self,name,value,options=None):
         if self.keyvalue is not None:
             self.keyvalue.Set(name,value,options=options)        
 
+    #Record an array of data for AI/SVM processing
     def AIChannel(self,name,data,precision=2):
         try:
             if self.arguments.nopng == True:
