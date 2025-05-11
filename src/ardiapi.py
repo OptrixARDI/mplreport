@@ -14,6 +14,7 @@ try:
 except ImportError:
     from urllib import urlencode
 
+#This defines a single ARDI context - a port to READ from and one to WRITE to
 class Context:
     def __init__(self):
         self.consolidator = 5336
@@ -21,16 +22,25 @@ class Context:
         self.name = "Actual"
         self.server = ""
 
+#Represents a single ARDI server
 class Server:
-    def __init__(self, srv, site='default', port=80):
+    def __init__(self, srv, site='default', port=None, secure=True):
+        #The full ARDI server URL
         self.server = srv        
+        
+        #The web port (if custom)
         self.webport = port
+        
+        #The name/folder of the site
         self.site = site
-        self.prefix = "http://"
-        if port == 443:
-            self.prefix = "https://"
+
+        #The schema for the URL
+        self.prefix = "https://"
+        if secure == False:
+            self.prefix = "http://"
         self.contexts = []
 
+        #Extract detail from the URL if the site was not given but is contained in the /s/
         bits = srv.split("/")
         if bits[0] == "":
             bits = bits[1:]
@@ -38,9 +48,31 @@ class Server:
             self.site = bits[2]
             self.server = bits[0]        
 
+    #Connect to the ARDI server
     def Connect(self):
-        url =  self.prefix + self.server + '/s/' + self.site + '/api/connect'        
-        resp = requests.get(url)
+        con = False
+
+        #Attempt HTTPS...
+        if self.prefix == "https://":
+            url = "https://" + self.server + '/s/' + self.site + '/api/connect'            
+            self.prefix = "https://"
+            try:
+                resp = requests.get(url)          
+                if resp.status_code == 200:
+                    con = True
+                    if self.webport is None:
+                        self.webport = "443"
+                    self.server = self.server.replace(":80","")
+            except:
+                pass
+
+        #If HTTPS connection fails...
+        if con == False:            
+            url =  "http://" + self.server + '/s/' + self.site + '/api/connect'                
+            self.prefix = "http://"            
+            if self.webport is None:
+                self.webport = "80"
+            resp = requests.get(url)
 
         # HTTP response code, e.g. 200.
         if resp.status_code == 200:            
@@ -48,8 +80,8 @@ class Server:
             #print 'XML Content: ' + buffer.getvalue()
             xml = xmltodict.parse(resp.text)
             
-            for d in xml['ardi']['service']:
-                #print 'Checking ' + d['@name']
+            #Parse the details of the server
+            for d in xml['ardi']['service']:                
                 if d['@name'] == 'data':
                     prt = 5336
                     src = self.server
@@ -73,9 +105,9 @@ class Server:
             #ar.close()
             return False        
         
-
+    #Get key configuration data from the ARDI server
     def GetConfiguration(self):        
-        url = self.prefix + self.server + ':' + str(self.port) + '/api/getconfiguration.php'
+        url = self.prefix + self.server + ':' + str(self.port) + '/api/getconfiguration'
         resp = requests.get(url)
 
         # HTTP response code, e.g. 200.
@@ -86,9 +118,11 @@ class Server:
             rels = []
             props = []
 
+            #Load relationship names
             for ele in xml['config']['relations']['relationship']:
                 rels.append({ 'name': ele['@name'], 'id': ele['@id'] })                
             
+            #Load property names
             for ele in xml['config']['properties']['property']:
                 props.append({ 'name' : ele['@name'], 'type' : ele['@type'], 'id' : ele['@id'] })
         else:
@@ -97,7 +131,8 @@ class Server:
         ar.close()        
         return [rels,props]
 
-    def GetDataSourceInfo(self):
+    #Get information about individual data sources
+    def GetDataSourceInfo(self):        
         url = self.prefix + self.server + ':' + str(self.port) + '/api/getdatasources.php'
         resp = requests.get(url)        
 
@@ -119,12 +154,15 @@ class Server:
         ar.close()        
         return [drivers,dsources]
 
+    #Return the full ARDI server URL
     def Endpoint(self):
         return self.prefix + self.server + ':' + str(self.webport) + "/s/" + self.site
 
+    #Create an AQL query object
     def StartQuery(self):
         return AQLQuery(self)
 
+#Convert an ARDI colour to a R/G/B tuple
 def ParseHexColour(hx):
     if hx[0] == '#':
         hx = hx[1:]
@@ -145,21 +183,28 @@ def ParseHexColour(hx):
 
     return (r,g,b)
     
-
+#An AQL history response
 class AQLHistResponse:
     def __init__(self,dframe,metadata):
         self.data = dframe
         self.metadata = {}
+        self.errors = []
+        
         for results in metadata['results']:
             if results['type'] == 'pointlist':
                 for v in results['value']:
                     nm = v['name'] + " " + v['propname']
                     v['history'] = None
-                    self.metadata[nm] = v                    
+                    self.metadata[nm] = v
+                    
+        if 'errors' in metadata:
+            self.errors = metadata['errors']
 
+    #Gets metadata about an individual column
     def GetColumnData(self,col):
         return self.metadata[col]
 
+    #Converts a discrete column value to text
     def GetColumnText(self,name,val):
         try:
             if name in self.metadata:
@@ -173,6 +218,7 @@ class AQLHistResponse:
         
         return str(val)    
 
+    #Converts an analogue or discrete value to a colour
     def GetColumnColour(self,name,val):        
         if name in self.metadata:
             if 'colours' in self.metadata[name]:                                    
@@ -201,6 +247,7 @@ class AQLHistResponse:
                 
         return "blue"
 
+    #Returns a colour map from a property name (used for discrete properties)
     def GetColourMap(self,name):        
         if name in self.metadata:
             if 'colours' in self.metadata[name]:
@@ -216,6 +263,7 @@ class AQLHistResponse:
                 return clrs
         return {}
 
+    #Returns a value map from a property name (used for discrete properties)
     def GetValueMap(self,name):        
         if name in self.metadata:
             if 'map' in self.metadata[name]:
@@ -228,6 +276,7 @@ class AQLHistResponse:
                     return self.metadata[name]['map']
         return {}
 
+#This is used to pass parameters for an AQL query
 class AQLHistRequest:
     def __init__(self,query,args=None):
         self.query = query
@@ -254,46 +303,58 @@ class AQLHistRequest:
         self.mode = "interp"
         self.context = 1
 
+    #Sets the name of the 'local' timezone
     def SetLocalTimezone(self,tz):
         self.localzone = tz
 
+    #Sets the start/end of the report, and optionally the number of 'chunks' to break it into
     def SetRange(self,start,end,chunks=None):
         self.sd = start
         self.ed = end
         self.chunks = chunks
 
+    #Gets the start and end times as a tuple
     def GetTrim(self):
         return (self.sd,self.ed)
 
+    #Gets the start and end times as formatted strings
     def GetRange(self):
         return [self.sd.strftime("%Y-%m-%d %H:%M:%S"),self.ed.strftime("%Y-%m-%d %H:%M:%S")]
 
+    #Request the data without interpolation
     def Raw(self):
         self.mode = "raw"
 
+    #Return the average values during each time window
     def Interpolated(self):
         self.mode = "interp"
 
+    #Return the minimum values during each time window
     def Min(self):
         self.mode = "min"
 
+    #Return the maximum values during each time window
     def Max(self):
         self.mode = "max"
 
+#Represents an AQL query
 class AQLQuery:
     def __init__(self,server):
         self.server = server
 
+    #Run the AQL query
     def Execute(self,query):
         url = self.server.Endpoint() + "/api/aql/query"        
         req = requests.post(url,{ "query": query })    
         return req.json()
 
+    #Return a fresh AQLHistRequest object based on the start and end times
     def StartHistoryRequest(self,query,start,end):
         r = AQLHistRequest(query)
         r.SetRange(start,end)
         return r
 
+    #Creates a new AQLHistRequest object based on query arguments that match those from MPLReport
     def StartHistoryQuery(self,query,args):
         r = AQLHistRequest(query)
         #print(dir(args))
@@ -302,6 +363,7 @@ class AQLQuery:
         r.serverzone = args.server_zone        
         return r
 
+    #Convert a value to a floating point number if possible
     def cvFloat(self,dta):
         if dta == "^":
             return None
@@ -311,12 +373,14 @@ class AQLQuery:
             except:
                 return dta
 
+    #Convert a value to an integer value if possible
     def cvInt(self,dta):
         if dta == "^":
             return None
         else:
             return int(dta)
 
+    #Convert a YYYY-MM-DD HH:MM:SS string to a LOCAL time
     def ConvertTZString(self,dt, fromtz, totz):       
         try:
             local = datetime.datetime.strptime(dt, "%Y-%m-%d %H:%M:%S")
@@ -331,10 +395,12 @@ class AQLQuery:
         
         return local.astimezone(totz).strftime("%Y-%m-%d %H:%M:%S")
 
+    #Convert a DateTime to a LOCAL time
     def ConvertTZDate(self,dt, fromtz, totz):               
         local = dt.replace(tzinfo=fromtz)            
         return local.astimezone(totz).replace(tzinfo=None)
 
+    #Get history from an AQLHistoryRequest
     def GetHistory(self,req,md=False):
         query = req.query
         if req.localzone is None:
@@ -387,9 +453,7 @@ class AQLQuery:
                 query = query.replace("%START%",'"' + str(chunk[0].strftime("%Y-%m-%d %H:%M:%S")) + '"')
                 query = query.replace("%END%",'"' + str(chunk[1].strftime("%Y-%m-%d %H:%M:%S")) + '"')
                 query = query.replace("%GRAIN%",'"' + str(chunkgrain) + '"')
-                #print(query)
-
-                #print(str(query))
+                #print(query)                
                 
                 results = self.Execute(query)
                 df = self.HistoryToDataframe(results,namemap=req.namemap,mapbad=req.mapbad,mapna = req.mapna,autofill=req.autofill,pad=req.pad,trim=chunk,serverzone = req.serverzone, localzone=req.localzone)
@@ -405,6 +469,7 @@ class AQLQuery:
             else:
                 return AQLHistResponse(finaldf,results)
 
+    #Convert a list of AQL points to a Dataframe
     def pointlistToDataFrame(self,results):
         columns = []
         for q in results['results']:        
@@ -413,7 +478,7 @@ class AQLQuery:
                     columns.append(r['name'] + " " + r['propname'])
         return pd.DataFrame(columns=columns)
     
-
+    #Convert AQL history to an interpolated/complete data frame
     def HistoryToDataframe(self,results,namemap=None,serverzone=None,localzone=None,mapbad=None,mapna=None,autofill=False,pad=True,trim=None):
         indx = -1
         frames = []
@@ -500,7 +565,7 @@ class AQLQuery:
         #Eliminate duplicate indexes
         #print(str(final))
         final = final.groupby(level=0).min()
-
+        
         findex = -1
         for col in final.columns:
             findex = findex + 1
@@ -508,13 +573,13 @@ class AQLQuery:
                 for x in mapna:
                     if x[0] == str(col):
                         if x[1] == 'hold' or x[1] == 'discrete':
-                            final[col].fillna(method='bfill',inplace=True)
-                            final[col].fillna(method='ffill',inplace=True)
+                            final[col] = final[col].bfill()
+                            final[col] = final[col].ffill()                           
                         else:
                             if x[1] == 'interp' or x[1] == 'cont':
                                 final[col] = final[col].interpolate()
-                                final[col].fillna(method='bfill',inplace=True)
-                                final[col].fillna(method='ffill',inplace=True)                        
+                                final[col] = final[col].bfill()
+                                final[col] = final[col].ffill()                
 
             if autofill == True:
                 try:
@@ -524,11 +589,9 @@ class AQLQuery:
                     pass
 
         if autofill == True:
-            final.fillna(method='ffill',inplace=True)
-            final.fillna(method='bfill',inplace=True)
-
-        #print(str(final))
-
+            final[col] = final[col].bfill()
+            final[col] = final[col].ffill()        
+        
         #Pad the start and end dates into the frame if not available
         if trim is not None:
                         
@@ -567,6 +630,7 @@ class AQLQuery:
         
         return final
 
+#Represents a live connection to ARDI data
 class Subscription:
     def __init__(self,core):
         self.core = core
@@ -579,16 +643,20 @@ class Subscription:
         self.context = None
         self.closed = False
 
+    #Adds a new ARDI point to the subscription
     def AddCode(self,address):
         self.codes.append(address)
         self.codechange = True
 
+    #Connect to live data
     def Connect(self):
         self.ThreadBody()
 
+    #Disconnect from live data
     def Disconnect(self):
         self.cancelled = True
 
+    #Internal: Initial live data subscription
     def Subscribe(self):
         self._call("subscribe")
         self.codechange = False
@@ -597,20 +665,24 @@ class Subscription:
         
         return False
     
+    #Set the callback function that is called with fresh data
     def SetCallback(self,call,cont):
         self.callback = call
         self.context = cont
 
+    #Internal: Unsubscribe from live data
     def Unsubscribe(self):
         self._call("unsubscribe")
         self.subscription = ""
         pass
 
+    #Disconnect from live data & clear subscriptions
     def Clear(self):
         if self.subscription != "":
             self.Unsubscribe()
         self.codes = []
 
+    #Performs an internal live data update, re-connecting if the subscription list has changed.
     def Update(self):
         if self.codechange == True:
             self.Unsubscribe()
@@ -619,6 +691,7 @@ class Subscription:
         self._call("update")
         pass
     
+    #Handle the long-polling request for live data
     def _call(self,function):
         
         if (len(self.codes) == 0):
@@ -709,6 +782,7 @@ class Subscription:
             traceback.print_exc()
             return False
 
+    #Main thread body
     def ThreadBody(self):
         while self.cancelled == False:
             while self.subscription == "":
@@ -732,6 +806,8 @@ class Subscription:
                 #No new data arrived - immediately try again.
                 time.sleep(0.5)
                 pass
+
+#Represents a single ARDI live channel
 class Channel:
     def __init__(self,session):        
         self.filters = None
@@ -756,6 +832,7 @@ class Channel:
     def __repr__(self):
         return self.AsText()
 
+#An more user-friendly variant of the Subscription that accepts human-readable point names.
 class Session:
     def __init__(self,server):
         self.server = server
@@ -774,6 +851,17 @@ class Session:
             js = query.Execute("'" + asset + "' ASSET '" + prop + "' PROPERTY VALUES")
             channels = self._getChannelsFromAQL(js)
 
+        if len(channels) > 0:
+            channel = channels[0]
+            self.channels.append(channel)
+            return channel
+        else:
+            return None
+
+    def AddPoint(self,asset,prop):
+        query = AQLQuery(self.server)
+        js = query.Execute(str(asset) + " ASSETBYID " + str(prop) + " PROPERTYBYID VALUES")
+        channels = self._getChannelsFromAQL(js)
         if len(channels) > 0:
             channel = channels[0]
             self.channels.append(channel)
@@ -865,9 +953,39 @@ class Session:
         
         return response
 
+    #Add multiple channels from a list of 'Asset.Property' strings
+    def AddChannelList(self,lst):
+        url = self.server.Endpoint() + "/api/lookuppoints"
+        resp = requests.post(url,{"points": ";".join(lst), "format": "json"})
+
+        #print("Lookup Results: " + resp.text)
+        dta = json.loads(resp.text)
+
+        channels = []
+        for pnt in dta:
+            chan = Channel(self)
+            chan.name = pnt['name']
+            chan.value = 0
+            chan.code = pnt['code']
+            if 'min' in pnt:
+                chan.properties["min"] = pnt['min']
+            if 'max' in pnt:
+                chan.properties["max"] = pnt['max']
+            if 'units' in pnt:
+                chan.properties["units"] = pnt['units']
+            
+            channels.append(chan)
+
+        for q in channels:        
+            #print("Adding " + str(q.name) + " / " + str(q.code))
+            self.channels.append(q)           
+
+        return channels
+
     def Callback(self,func):
         self.callbackfunction = func
         
+    #Connect and start processing
     def Start(self):
         self.subscription = Subscription(self.server)
         for n in self.channels:
@@ -881,3 +999,9 @@ class Session:
         self.subscription.SetCallback(self._dataupdates,None)
         self.subscription.Connect()        
         return True
+
+    #Disconnect
+    def Stop(self):
+        if self.subscription is not None:
+            self.subscription.Disconnect()
+            self.subscription = None

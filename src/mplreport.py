@@ -15,22 +15,17 @@ try:
 except:
     pass
 
-try:    
-    import ardi.util.outputengine as outengine    
+try:
+    import ardi.util.outputengine as outengine
 except:
-    try:    
-        import outputengine as outengine        
-    except:
-        print("Modular Output System Not Available On This Device")
-        pass
     pass
 
 try:
     import ardiapi
 except:
+    print("Can't Import API!")
     pass
 
-#Get report settings from the config file
 def GetReportSettings():
     basepath = os.path.dirname(os.path.abspath(__file__))
     settings = {}
@@ -43,24 +38,17 @@ def GetReportSettings():
         return json.loads(content)
         
     else:
-        if os.path.exists(basepath + "/settings.txt"):
-            fl = open(basepath + "/settings.txt", "r")
-            lines = fl.readlines()        
-            fl.close()        
+        fl = open(basepath + "/settings.txt", "r")
+        lines = fl.readlines()        
+        fl.close()        
 
-            try:
-                settings['server'] = lines[3].strip()
-                settings['sitecode'] = lines[1].strip()
-                settings['sitename'] = lines[0].strip()
-                settings['timezone'] = lines[2].strip()        
-            except:
-                pass
-        else:
-            settings = {}
+        settings['server'] = lines[3].strip()
+        settings['sitecode'] = lines[1].strip()
+        settings['sitename'] = lines[0].strip()
+        settings['timezone'] = lines[2].strip()        
 
     return settings
 
-#Parse command-line parameters
 def ParseReportArgs(name):
     import argparse
     from dateutil import tz
@@ -145,6 +133,7 @@ def ardireport(*args,**kwargs):
         #import aql
                 
         stime = datetime.datetime.now()
+        #rargs = aql.ReportArgs(args[0])
         rargs = ParseReportArgs(args[0])
         report = CreateFromArgs(rargs,*kwargs)
 
@@ -162,6 +151,7 @@ def ardireport(*args,**kwargs):
         if configfile is not None:
             try:
                 if rargs.nopng == False:
+                    print("Loading MOS Configuration: " + str(configfile))
                     keyvalue = outengine.KVOutput("Report Output",configfile = configfile)
                     event = outengine.EVOutput("Report Output",configfile = configfile)
                 else:
@@ -185,9 +175,9 @@ def ardireport(*args,**kwargs):
                     try:                    
                         etime = datetime.datetime.now()
                         tmx = (etime - stime).total_seconds()                    
-                        keyvalue.Set(args[0] + " Report/Success",1)
-                        keyvalue.Set(args[0] + " Report/Last Generated",stime.strftime("%Y-%m-%d %H:%M:%S"))
-                        keyvalue.Set(args[0] + " Report/Generation Time",tmx)
+                        keyvalue.Set(args[0] + " Report/Success",1,options={"type":"reportmetadata"})
+                        keyvalue.Set(args[0] + " Report/Last Generated",stime.strftime("%Y-%m-%d %H:%M:%S"),options={"type":"reportmetadata"})
+                        keyvalue.Set(args[0] + " Report/Generation Time",tmx,options={"type":"reportmetadata"})
                         keyvalue.Stop()
                         
                         event.Write(args[0] + " Generated",tmx,options={"success":  True,"report": args[0]})
@@ -196,6 +186,7 @@ def ardireport(*args,**kwargs):
                         traceback.print_exc()
                         pass
         except:
+            traceback.print_exc()
             report.Failed()
 
             if rargs.nopng == False:
@@ -203,9 +194,9 @@ def ardireport(*args,**kwargs):
                     etime = datetime.datetime.now()
                     tmx = (etime - stime).total_seconds()
                     keyvalue = outengine.KVOutput("Report Output",configfile = configfile)                
-                    keyvalue.Set(args[0] + " Report/Success",0)
-                    keyvalue.Set(args[0] + " Report/Last Generated",stime.strftime("%Y-%m-%d %H:%M:%S"))
-                    keyvalue.Set(args[0] + " Report/Generation Time",-1)
+                    keyvalue.Set(args[0] + " Report/Success",0,options={"type":"reportmetadata"})
+                    keyvalue.Set(args[0] + " Report/Last Generated",stime.strftime("%Y-%m-%d %H:%M:%S"),options={"type":"reportmetadata"})
+                    keyvalue.Set(args[0] + " Report/Generation Time",-1,options={"type":"reportmetadata"})
                     keyvalue.Stop()
 
                     event = outengine.EVOutput("Report Output",configfile = configfile)                
@@ -218,15 +209,11 @@ def ardireport(*args,**kwargs):
 
 
 def CreateFromArgs(args):
-    settings = GetReportSettings()    
-
     paper = "default"
     if args.size is not None:
         paper = args.size
-    else:
-        if 'paper' in settings:
-            paper = settings['paper']
-            
+
+    settings = GetReportSettings()
     previewdir = args.target + ".png"
     if args.nopng == True:
         previewdir = None
@@ -259,7 +246,6 @@ def UTCToLocalTime(tm):
     tm = tm.replace(tzinfo=None)
     return tm
 
-#Create a simple MatPlotLib report
 class MPLReport():
     def __init__(self,name,target,preview=None,papersize="default",orient="portrait",multipage=False,fmt="pdf",style=None,defaultstart=None,defaultend=None):
         self.multi = multipage
@@ -290,10 +276,13 @@ class MPLReport():
         self.titlespace = 0
         self.timezonename = "UTC"
         self.tz = None
+        self.padding = 0.1
+        self.layoutbase = [0.05,0.05,0.96,0.96]
+        self.errors = []
+        self.failed = False
 
         pd.plotting.register_matplotlib_converters()
 
-    #Create a single page. Same arguments as 'subplots'
     def CreatePage(self,*args,**kwargs):
 
         if self.tz is None:
@@ -312,7 +301,7 @@ class MPLReport():
 
         if self.pdf is not None:
             if self.sizeset == False:
-                self.figure.tight_layout(rect=[0.05+self.nudge[0], 0.05+self.nudge[1], 0.96, 0.96])    
+                self.figure.tight_layout(rect=[self.layoutbase[0]+self.nudge[0], self.layoutbase[1]+self.nudge[1], self.layoutbase[2], self.layoutbase[3]])    
                 if self.titlespace != 0:
                     plt.subplots_adjust(top=1-self.titlespace)
                 self.sizeset = True
@@ -353,7 +342,8 @@ class MPLReport():
         wid = 8.27
         hit = 11.69
         psize = psize.upper()
-        
+
+        #print("New Page Size: " + str(psize))
         if psize == "DEFAULT":
             psize = "A4"
 
@@ -412,11 +402,9 @@ class MPLReport():
         self.figure = fig
         return (fig,ax)
 
-    #Adjusts the overall report margins
     def NudgeContent(self,x,y):
         self.nudge = (x,y)
 
-    #Writes out an alert, if required
     def WriteAlert(self,alertname,alertvalue):
         if self.alerts is None:
             self.alerts = {}
@@ -447,14 +435,12 @@ class MPLReport():
             if df > (60*60*24*3):
                 return datepart
             else:
-                return '%H ' + datepart
+                return '%H ' + datepart        
         return '%H:%M'
 
-    #Returns a suitable date formatter for the given range
     def DateFormatter(self,starttime=None,endtime=None):        
         return mdates.DateFormatter(self.DateFormat(starttime,endtime))
 
-    #Internal: Adjust the logo position based on the print DPI
     def AdjustLogoForDPI(self,dpi):
         img = None
         try:
@@ -466,7 +452,6 @@ class MPLReport():
         if img is None:
             return
 
-    #Draw a simple title block at the top of the page
     def Title(self,starttime=None,endtime=None,override=None,location=None,args=None):        
         
         top = 0.94
@@ -539,16 +524,19 @@ class MPLReport():
             + endstr,
             fontsize=10,
         )
-
-        self.figure.tight_layout(rect=[0.05+self.nudge[0], 0.05+self.nudge[1], 0.96, 0.87]) 
+        
+        self.figure.tight_layout(rect=[self.layoutbase[0]+self.nudge[0], self.layoutbase[1]+self.nudge[1], self.layoutbase[2], self.layoutbase[3] - 0.1]) 
         if self.titlespace != 0:
             plt.subplots_adjust(top=1-self.titlespace)
         self.sizeset = True
 
-    #Write out the report
     def Save(self):
 
+        if self.failed == True:
+            return
+
         if self.sizeset == False:
+                print("Laying Out: " + str(self.nudge))
                 self.figure.tight_layout(rect=[0.05+self.nudge[0], 0.05+self.nudge[1], 0.96, 0.96])    
                 if self.titlespace != 0:
                     plt.subplots_adjust(top=0.85)
@@ -572,7 +560,7 @@ class MPLReport():
             from io import StringIO
             f = StringIO()            
             self.figure.savefig(f,format="png",dpi=100,
-                pad_inches=0.1,
+                pad_inches=self.padding,
                 bbox_inches="tight",
                 transparent=True)
             print("-------------")
@@ -648,7 +636,6 @@ class MPLReport():
             fl.flush()
             fl.close()
 
-    #Mark a single MatPlotLib axis as a failure
     def FailedAxis(self,ax,message="Invalid / No Data"):
         try:
             ax.axis('tight')
@@ -660,13 +647,11 @@ class MPLReport():
         except:
             traceback.print_exc()
         
-    #Draw a simple grid
     def Grid(self,ax):
         ax.set_axisbelow(True)
         ax.yaxis.grid(color='gray', linestyle='dashed')
         ax.xaxis.grid(color='gray', linestyle='dashed')
 
-    #Get the current values from an AQL query
     def GetCurrent(self,query):
         self.srv = self.GetARDIServer()
         qry = self.srv.StartQuery()
@@ -686,18 +671,30 @@ class MPLReport():
 
         return pd.DataFrame(data = [values],columns=columns,index=[datetime.datetime.now()])
 
-    #Get history from ARDI with Metadata
+    def ClearFailures(self):
+        self.errors = []
+
+    def FetchFailure(self):
+        if len(self.errors) > 0:
+            return True
+        return False
+
     def FetchHistory(self,query,**kwargs):
         kwargs["md"] = True
-        return self.GetHistory(query,**kwargs) 
+        return self.GetHistory(query,**kwargs)
 
-    #Get history from ARDI without Metadata
+    def FailOnError(self,name=""):
+        if self.FetchFailure():
+            name = name + " "
+            self.Failed(name + "Data Unavailable: " + "\n".join(self.errors))
+
     def GetHistory(self,query,start=None,end=None,samples=None,method=None,utc=False,md=False):
 
         if "GETHISTORY" not in query:
             query += " {} GETHISTORY"
         
         self.srv = self.GetARDIServer()
+        #print("ARDI Connection: " + str(self.srv))
 
         if samples is None:
             samples = 2000
@@ -731,10 +728,15 @@ class MPLReport():
         if method == "min":
             req.Min()
 
-        #Get the pandas data-frame with the results.
-        return qry.GetHistory(req,md)
+        hst = qry.GetHistory(req,True)
 
-    #Get a list of events from ARDI
+        for e in hst.errors:
+            self.errors.append(e)
+
+        if md == False:
+            return hst.data
+        return hst
+
     def GetEvents(self,source=None,start=None,end=None,utc=True):
         if start is None:
             start = self.defaultstart
@@ -746,11 +748,15 @@ class MPLReport():
         if source is not None:
             query += ',"sources": "' +  str(source) + '"'
             
-        query += '} GETEVENTS'        
+        query += '} GETEVENTS'
+
+        #print(query)
         
         self.srv = self.GetARDIServer()
         qry = self.srv.StartQuery()
         result = qry.Execute(query)
+
+        #print("Got Results")
 
         resolved = []
         for n in result['results']:
@@ -766,18 +772,19 @@ class MPLReport():
                         q['start'] = self.LocalTime(q['start'])
                         q['end'] = self.LocalTime(q['end'])
                     resolved.append(q)
+
+        if 'errors' in result:
+            for e in result['errors']:
+                self.errors.append(e)
             
         return resolved
 
-    #Clear the PDF
     def Clear(self):
         self.pdf = None
 
-    #Format the time axis with an appropriate scale
     def TimeAxis(self,ax):
         ax.set_major_formatter(self.DateFormatter())
 
-    #Find a suitable duration unit given a number of seconds
     def DurationUnitFromSeconds(self,duration):
         spn = duration
         unit = 's'
@@ -795,7 +802,6 @@ class MPLReport():
 
         return (unit, multiplier)  
 
-    #Find a suitable duration unit given the range of the report or the given date range.
     def DurationUnit(self,start=None,end=None):
         if start is None:
             start = self.defaultstart
@@ -819,7 +825,6 @@ class MPLReport():
 
         return (unit, multiplier)    
 
-    #Map a sequence of index numbers to an axis based on the report time range
     def HeatMapTimeAxis(self,ax,samples,starttime=None,endtime=None):
 
         if starttime is None:
@@ -845,7 +850,6 @@ class MPLReport():
         ax.set_ticks(xticks)
         ax.set_ticklabels(xticklabels)
 
-    #Remove common elements from a set of axis ticks
     def SimplifyTicks(self,ticks):
         common = None
 
@@ -913,11 +917,9 @@ class MPLReport():
 
         return ticks
 
-    #Get a small colour sequence
     def GetDefaultSequence(self):
         return ['g','b','y','m','c','r','purple','orange','silver']
 
-    #Create the items for a legend based on discrete property metadata
     def GetDiscreteLegend(self,dta,col):
 
         from matplotlib.patches import Patch        
@@ -950,35 +952,24 @@ class MPLReport():
 
         return (litems,named)
 
-    #Get a MatPlotLib colour table based on property metadata
     def GetDiscreteColourMap(self,dta,col):
-        mp = dta.GetColourMap(col)        
-        if isinstance(mp,dict):
-            for x in mp:                
-                if str(mp[x])[0] == '#':
-                    mp[x] = ardiapi.ParseHexColour(mp[x][1:])
-                else:
-                    mp[x] = ardiapi.ParseHexColour(mp[x])
-        else:
-            indx = -1
-            for x in mp:   
-                indx += 1
-                if str(x)[0] == '#':
-                    mp[indx] = ardiapi.ParseHexColour(x[1:])
-                else:
-                    mp[indx] = ardiapi.ParseHexColour(x)
-                    
+        mp = dta.GetColourMap(col)
+        indx = -1
+        for x in mp:
+            indx += 1
+            if str(x)[0] == '#':
+                mp[indx] = ardiapi.ParseHexColour(x[1:])
+            else:
+                mp[x] = ardiapi.ParseHexColour(mp[x])
+            
         return mp
 
-    #Get a MatPlotLib colour table based on property metadata
     def GetDiscreteValueMap(self,dta,col):
         return dta.GetValueMap(col)
 
-    #Get a MatPlotLib colour table based on property metadata
     def GetAnalogueColourMap(self,dta,col):
         return self.GetAnalogColourMap(dta,col)
 
-    #Get a MatPlotLib colour table based on property metadata
     def GetAnalogColourMap(self,dta,col):
         from matplotlib.colors import LinearSegmentedColormap
         md = dta.GetColumnData(col)
@@ -991,9 +982,15 @@ class MPLReport():
                           
             colours=[]
             nodes = []
+            #print(str(md['colours']))
             for x in md['colours']:
-                if isinstance(x,str):
-                    colours.append(ardiapi.ParseHexColour(x))
+                vx = None
+                try:
+                    vx = float(x)
+                except:
+                    pass
+                if vx is None:
+                    colours.append(ardiapi.ParseHexColour(x))                    
                     nodes.append((float(len(nodes)) - minvalue) / ran)
                 else:
                     if len(nodes) == 0:
@@ -1002,11 +999,14 @@ class MPLReport():
                             nodes.append(0)
                             
                     colours.append(ardiapi.ParseHexColour(md['colours'][x]))
-                    nodes.append((float(x) - minvalue) / ran)
+                    nodes.append((float(vx) - minvalue) / ran)
 
             if nodes[len(nodes)-1] < 1:
                 nodes.append(1)
-                colours.append(colours[len(colours)-1])            
+                colours.append(colours[len(colours)-1])
+
+            #print(str(col))
+            print(str(list(zip(nodes, colours))))
             
             cmap = LinearSegmentedColormap.from_list(col, list(zip(nodes, colours)))            
             
@@ -1017,28 +1017,28 @@ class MPLReport():
         maxvalue = float(md['max'])
         return (matplotlib.cm.get_cmap('viridis'),minvalue,maxvalue)
 
-    #Gets the ARDI server object
     def GetARDIServer(self):
         if self.ardiserver is None:
             return None
         
-        if self.srv is None:                        
-            self.srv = ardiapi.Server(self.ardiserver)            
+        if self.srv is None:            
+            self.srv = ardiapi.Server(self.ardiserver)
             
             if self.srv.Connect() == False:
-                print("Could not connect to ARDI server " + self.ardiserver)
                 self.srv = None
                 
         return self.srv
         
-    #Show a failure message
-    def Failed(self,showex=True):
+    def Failed(self,message=None,showex=False):
         try:
             import traceback
         except:
             pass
 
-        self.Clear()
+        if self.failed == True:
+            return
+
+        self.Clear()        
 
         fig,ax = self.CreatePage(1)
 
@@ -1046,25 +1046,32 @@ class MPLReport():
 
         ax.text(0.5,0.65,"This Report is Unavailable",verticalalignment='top',horizontalalignment='center',fontsize=20,fontweight='bold')
         
-        #ax.text(0.5,0.35,"This is usually due to little or no activity during the reporting period.",verticalalignment='top',horizontalalignment='center',multialignment='center')
+        if message is not None:
+            ax.text(0.5,0.35,message,verticalalignment='top',horizontalalignment='center',multialignment='center')
         
-        try:
-            content = traceback.format_exc()
-            lines = content.split("\n")
-            summary = lines[len(lines)-2]            
+        if showex == True:
+            try:
+                content = traceback.format_exc()
+                lines = content.split("\n")
+                summary = lines[len(lines)-2]            
 
-            #ax.text(0.5,0.2,summary,verticalalignment='top',horizontalalignment='center',multialignment='center')
+                ax.text(0.5,0.2,summary,verticalalignment='top',horizontalalignment='center',multialignment='center')
             
-            traceback.print_exc()
-        except:
-            pass
+                traceback.print_exc()
+            except:
+                pass
 
         ax.axis('off')     
 
-        self.Save()
-        print("FAILED")
+        try:
+            self.Save()
+        except:
+            pass
 
-    #Show an overall failure message, but still consider the report successful (use when no data is available)
+        self.failed = True
+        print("FAILED")        
+        sys.exit()
+
     def SoftFailure(self,message):
         try:
             import traceback
@@ -1077,13 +1084,15 @@ class MPLReport():
 
         self.Title(self.name)
 
-        ax.text(0.5,0.65,"This Report Is Empty",verticalalignment='top',horizontalalignment='center',fontsize=20,fontweight='bold')
+        ax.text(0.5,0.65,"This Report Is Unavailable",verticalalignment='top',horizontalalignment='center',fontsize=20,fontweight='bold')
         
         ax.text(0.5,0.35,message,verticalalignment='top',horizontalalignment='center',multialignment='center')
                 
-        ax.axis('off')
+        ax.axis('off')     
 
-    #Convert a Pandas index from UTC to local time
+        #self.Save()
+        #print("SUCCESS")
+
     def LocalIndex(self,df):
         if self.tz is None:
             if self.timezonename == "UTC":
@@ -1094,7 +1103,6 @@ class MPLReport():
         df.index = df.index.tz_localize(pytz.utc).tz_convert(self.tz).tz_localize(None)
         return df
 
-    #Convert local time to UTC Time
     def UTCTime(self,tm):
         if self.tz is None:
             if self.timezonename == "UTC":
@@ -1105,9 +1113,8 @@ class MPLReport():
         tm = tm.replace(tzinfo=self.tz)    
         tm = tm.astimezone(pytz.utc)
         tm = tm.replace(tzinfo=None)
-        return tm
+        return tm    
 
-    #Convert UTC time to Local time
     def LocalTime(self,tm):
         if self.tz is None:
             if self.timezonename == "UTC":
@@ -1120,17 +1127,26 @@ class MPLReport():
         tm = tm.replace(tzinfo=None)
         return tm
 
-    #Log an event to the Modular Output System
     def LogEvent(self,name,duration,offset=0,options=None):
-        if self.events is not None:
-            self.events.Write(name,duration,offset=offset,options=options)        
+        if self.IsCustom() == False:
+            if self.events is not None:
+                self.events.Write(name,duration,offset=offset,options=options)        
 
-    #Log a key/value to the Modular Output System
     def LogValue(self,name,value,options=None):
-        if self.keyvalue is not None:
-            self.keyvalue.Set(name,value,options=options)        
+        if self.IsCustom() == False:
+            if self.keyvalue is not None:
+                self.keyvalue.Set(name,value,options=options)
+            else:
+                print("No MOS Available")
 
-    #Record an array of data for AI/SVM processing
+    def IsCustom(self):
+        try:
+            if self.arguments.nopng == True:
+                return True
+        except:
+            pass
+        return False
+
     def AIChannel(self,name,data,precision=2):
         try:
             if self.arguments.nopng == True:
