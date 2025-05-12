@@ -369,16 +369,22 @@ class AQLQuery:
             return None
         else:
             try:
-                return float(dta)
+                v = float(dta)
+                if v != "NaN":
+                    return v
             except:
                 return dta
+        return dta
 
     #Convert a value to an integer value if possible
     def cvInt(self,dta):
         if dta == "^":
             return None
         else:
-            return int(dta)
+            v = int(dta)
+            if v != "NaN":
+                return v
+        return dta
 
     #Convert a YYYY-MM-DD HH:MM:SS string to a LOCAL time
     def ConvertTZString(self,dt, fromtz, totz):       
@@ -588,9 +594,9 @@ class AQLQuery:
                 except:
                     pass
 
-        if autofill == True:
-            final[col] = final[col].bfill()
-            final[col] = final[col].ffill()        
+            if autofill == True:
+                final[col] = final[col].bfill()
+                final[col] = final[col].ffill()        
         
         #Pad the start and end dates into the frame if not available
         if trim is not None:
