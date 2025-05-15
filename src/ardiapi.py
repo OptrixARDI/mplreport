@@ -34,6 +34,9 @@ class Server:
         #The name/folder of the site
         self.site = site
 
+        #The timezone of the server
+        self.timezone = None
+
         #The schema for the URL
         self.prefix = "https://"
         if secure == False:
@@ -99,7 +102,18 @@ class Server:
                     ctx.consolidator= prt
                     ctx.server = src
                     ctx.name = "Actual"
-                    self.contexts.append(ctx)
+                    self.contexts.append(ctx)            
+
+            #Parse the details of the server
+            for d in xml['ardi']['setting']:               
+                if d['@name'] == 'timezone':
+                    try:                        
+                        self.timezone = pytz.timezone(d['#text'])
+                    except:
+                        print("Invalid Server Timezone")
+                        traceback.print_exc()
+                        self.timezone = pytz.utc
+
             return True
         else:
             #ar.close()
@@ -161,6 +175,22 @@ class Server:
     #Create an AQL query object
     def StartQuery(self):
         return AQLQuery(self)
+
+    #Convert a local time to UTC
+    def ToUTC(self,dt):        
+        if self.timezone == None:
+            print("WARNING: Unknown Time Zone. Old server, or not connected.")
+            return dt
+        dt = dt.replace(tzinfo=self.timezone)
+        return dt.astimezone(pytz.utc).replace(tzinfo=None)
+
+    #Convert a UTC time to local time
+    def ToLocal(self,dt):
+        if self.timezone == None:
+            print("WARNING: Unknown Time Zone. Old server, or not connected.")
+            return dt
+        dt = dt.replace(tzinfo=pytz.utc)
+        return dt.astimezone(self.timezone).replace(tzinfo=None)
 
 #Convert an ARDI colour to a R/G/B tuple
 def ParseHexColour(hx):
