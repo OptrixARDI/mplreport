@@ -185,9 +185,10 @@ def ardireport(*args,**kwargs):
                     except:
                         traceback.print_exc()
                         pass
-        except:
+        except Exception as e:
             traceback.print_exc()
-            report.Failed()
+            guess = CommonErrors(e)
+            report.Failed(guess)         
 
             if rargs.nopng == False:
                 try:
@@ -1194,3 +1195,10 @@ class MPLReport():
         except:
             traceback.print_exc()
             pass
+
+def CommonErrors(ex):
+    if isinstance(ex,OverflowError):
+        return "Infinite Number or Division By Zero Error - Possibly Due to Outage"
+    if isinstance(ex,ZeroDivisionError):
+        return "Division By Zero Error - Possibly Due to Outage"
+    return None

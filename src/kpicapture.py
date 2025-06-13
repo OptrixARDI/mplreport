@@ -16,9 +16,20 @@ class KPICapture:
                 
         self.values = {}
         
+    #Convert from common Numpy formats to something that the JSON encoder will accept
+    def MakeValid(self,value):
+        if isinstance(value,np.integer):
+            return int(value)
+        if isinstance(value,np.floating):
+            return float(value)
+
+        return value
+        
+    #Capture a single data value
     def CaptureValue(self,name,value):
         self.values[name] = value
 
+    #Write captured values to storage
     def Commit(self,dt):           
         filename = self.basedir + "/" + dt.strftime("%Y%m%d%H") + ".json"
         if not os.path.exists(self.basedir):
@@ -38,7 +49,7 @@ class KPICapture:
 
 
         for q in self.values:
-            content[q] = self.values[q]
+            content[q] = self.MakeValid(self.values[q])
 
         fl = open(filename,'w')
         fl.write(json.dumps(content))
